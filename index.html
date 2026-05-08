@@ -52,6 +52,7 @@
     display: flex; flex-direction: column;
   }
 
+  /* ===== Header ===== */
   .header {
     padding: 18px 20px 12px;
     display: flex; align-items: center; justify-content: space-between;
@@ -72,6 +73,7 @@
     font-size: 20px;
   }
 
+  /* ===== Tabs ===== */
   .tabs {
     display: flex;
     border-bottom: 1px solid var(--line);
@@ -89,6 +91,7 @@
   }
   .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 
+  /* ===== Pages ===== */
   .page {
     flex: 1;
     padding: 16px 20px 32px;
@@ -96,6 +99,7 @@
   }
   .page.active { display: block; }
 
+  /* ===== Form: add player ===== */
   .add-row {
     display: flex; gap: 10px;
     margin-bottom: 18px;
@@ -122,6 +126,7 @@
   }
   .add-btn:disabled { opacity: 0.4; }
 
+  /* ===== Stats bar ===== */
   .stats {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -137,6 +142,7 @@
   .stat-value { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .stat-value.accent { color: var(--accent); }
 
+  /* ===== Player list ===== */
   .player-list { list-style: none; padding: 0; margin: 0; }
   .player-item {
     display: flex; align-items: center; gap: 12px;
@@ -185,6 +191,7 @@
   }
   .empty .big { font-size: 48px; margin-bottom: 10px; }
 
+  /* ===== Court setter ===== */
   .court-card {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -214,6 +221,7 @@
   .court-num { font-size: 40px; font-weight: 900; font-variant-numeric: tabular-nums; }
   .court-num small { font-size: 16px; color: var(--text-faint); font-weight: 500; margin-left: 4px; }
 
+  /* ===== Generate button ===== */
   .generate-btn {
     width: 100%;
     background: var(--accent);
@@ -240,6 +248,7 @@
   }
   .undo-btn:disabled { opacity: 0.3; }
 
+  /* ===== Round / matches ===== */
   .round-header {
     display: flex; align-items: baseline; justify-content: space-between;
     margin: 8px 0 12px;
@@ -308,8 +317,12 @@
   }
   .resting-list { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
 
-  .history-round { margin-bottom: 22px; }
+  /* ===== History ===== */
+  .history-round {
+    margin-bottom: 22px;
+  }
 
+  /* ===== Modal / menu ===== */
   .sheet-bg {
     position: fixed; inset: 0;
     background: rgba(0,0,0,0.6);
@@ -382,6 +395,7 @@
     <button class="tab" data-tab="history">履歴</button>
   </nav>
 
+  <!-- ===== Players ===== -->
   <section class="page active" id="page-players">
     <div class="add-row">
       <input id="nameInput" type="text" placeholder="名前を入力" maxlength="20" autocomplete="off">
@@ -394,6 +408,7 @@
     </div>
   </section>
 
+  <!-- ===== Match ===== -->
   <section class="page" id="page-match">
     <div class="court-card">
       <div class="court-label">コート数</div>
@@ -425,6 +440,7 @@
     <div id="latestRound"></div>
   </section>
 
+  <!-- ===== History ===== -->
   <section class="page" id="page-history">
     <div id="historyList"></div>
     <div class="empty" id="historyEmpty">
@@ -434,6 +450,7 @@
   </section>
 </div>
 
+<!-- Menu sheet -->
 <div class="sheet-bg" id="menuSheet">
   <div class="sheet">
     <div class="sheet-handle"></div>
@@ -446,16 +463,24 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// ============================================================
+// MatchMaker 3v3 — Web版 (SwiftUI版からのロジック移植)
+// ============================================================
+
 const STORAGE_KEY = "matchmaker3v3_v1";
 
+// ----- State -----
 let state = {
-  players: [],
+  players: [],   // { id, name, isActive, gamesPlayed }
   courtCount: 1,
-  rounds: [],
+  rounds: [],    // { roundNumber, matches:[{courtNumber, teamA, teamB}], resting, timestamp }
 };
 
+// ----- Storage -----
 function save() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) { console.warn("save failed", e); }
 }
 function load() {
   try {
@@ -466,9 +491,10 @@ function load() {
       if (!Array.isArray(state.rounds)) state.rounds = [];
       if (typeof state.courtCount !== "number" || state.courtCount < 1) state.courtCount = 1;
     }
-  } catch (e) {}
+  } catch (e) { console.warn("load failed", e); }
 }
 
+// ----- Utilities -----
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function showToast(msg) {
   const t = document.getElementById("toast");
@@ -482,10 +508,16 @@ function effectiveCourts() {
   return Math.min(state.courtCount, Math.floor(activePlayers().length / 6));
 }
 
+// ----- Player CRUD -----
 function addPlayer(name) {
   const trimmed = name.trim();
   if (!trimmed) return;
-  state.players.push({ id: uid(), name: trimmed, isActive: true, gamesPlayed: 0 });
+  state.players.push({
+    id: uid(),
+    name: trimmed,
+    isActive: true,
+    gamesPlayed: 0,
+  });
   save(); renderAll();
 }
 function removePlayer(id) {
@@ -508,37 +540,116 @@ function resetAll() {
   showToast("全データをリセットしました");
 }
 
+// ----- Match generation -----
+// 過去のラウンドからペアごとの「チームメイト回数」「対戦回数」を集計
+function buildPairHistory() {
+  const teammate = new Map();
+  const opponent = new Map();
+  const key = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+  const add = (m, a, b) => { const k = key(a, b); m.set(k, (m.get(k) || 0) + 1); };
+  state.rounds.forEach(r => {
+    r.matches.forEach(m => {
+      for (let i = 0; i < m.teamA.length; i++)
+        for (let j = i + 1; j < m.teamA.length; j++)
+          add(teammate, m.teamA[i].id, m.teamA[j].id);
+      for (let i = 0; i < m.teamB.length; i++)
+        for (let j = i + 1; j < m.teamB.length; j++)
+          add(teammate, m.teamB[i].id, m.teamB[j].id);
+      m.teamA.forEach(a => m.teamB.forEach(b => add(opponent, a.id, b.id)));
+    });
+  });
+  return { teammate, opponent };
+}
+
+// 6人をA3/B3に分ける最適解を全20通りから探す
+function bestSplit(six, hist) {
+  const key = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+  const get = (m, a, b) => m.get(key(a, b)) || 0;
+  let best = null;
+  let bestScore = Infinity;
+  for (let a = 0; a < 6; a++) {
+    for (let b = a + 1; b < 6; b++) {
+      for (let c = b + 1; c < 6; c++) {
+        const teamA = [six[a], six[b], six[c]];
+        const teamB = six.filter((_, i) => i !== a && i !== b && i !== c);
+        let score = 0;
+        for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) {
+          score += get(hist.teammate, teamA[i].id, teamA[j].id) * 3;
+          score += get(hist.teammate, teamB[i].id, teamB[j].id) * 3;
+        }
+        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+          score += get(hist.opponent, teamA[i].id, teamB[j].id) * 2;
+        }
+        score += Math.random() * 0.01; // 同点をランダム化
+        if (score < bestScore) { bestScore = score; best = { teamA, teamB }; }
+      }
+    }
+  }
+  return best;
+}
+
+// 出場者全員をコートに振り分ける(複数試行のうち最良を採用)
+function assignToCourts(playing, courts, hist) {
+  const key = (a, b) => (a < b ? a + "|" + b : b + "|" + a);
+  const get = (m, a, b) => m.get(key(a, b)) || 0;
+  let best = null;
+  let bestScore = Infinity;
+  const trials = courts === 1 ? 1 : 80;
+  for (let t = 0; t < trials; t++) {
+    const shuffled = [...playing].sort(() => Math.random() - 0.5);
+    let score = 0;
+    const matches = [];
+    for (let c = 0; c < courts; c++) {
+      const six = shuffled.slice(c * 6, c * 6 + 6);
+      const split = bestSplit(six, hist);
+      for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) {
+        score += get(hist.teammate, split.teamA[i].id, split.teamA[j].id) * 3;
+        score += get(hist.teammate, split.teamB[i].id, split.teamB[j].id) * 3;
+      }
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+        score += get(hist.opponent, split.teamA[i].id, split.teamB[j].id) * 2;
+      }
+      matches.push({ courtNumber: c + 1, teamA: split.teamA, teamB: split.teamB });
+    }
+    if (score < bestScore) { bestScore = score; best = matches; }
+  }
+  return best;
+}
+
 function generateNextRound() {
   const active = activePlayers();
   const usable = effectiveCourts();
   if (usable < 1) return;
   const needed = usable * 6;
+
+  // 試合数の少ない順 + 同数ランダム で出場者を決定
   const sorted = [...active].sort((a, b) => {
     if (a.gamesPlayed !== b.gamesPlayed) return a.gamesPlayed - b.gamesPlayed;
     return Math.random() - 0.5;
   });
   const playing = sorted.slice(0, needed);
   const resting = sorted.slice(needed);
-  const shuffled = [...playing].sort(() => Math.random() - 0.5);
-  const matches = [];
-  for (let c = 0; c < usable; c++) {
-    const six = shuffled.slice(c * 6, c * 6 + 6);
-    matches.push({
-      courtNumber: c + 1,
-      teamA: six.slice(0, 3).map(p => ({ id: p.id, name: p.name })),
-      teamB: six.slice(3, 6).map(p => ({ id: p.id, name: p.name })),
-    });
-  }
+
+  // 過去履歴を踏まえて、重複が最小になるチーム分けを探す
+  const hist = buildPairHistory();
+  const matches = assignToCourts(
+    playing.map(p => ({ id: p.id, name: p.name })),
+    usable,
+    hist
+  );
+
   playing.forEach(p => {
     const found = state.players.find(x => x.id === p.id);
     if (found) found.gamesPlayed += 1;
   });
+
   state.rounds.unshift({
     roundNumber: state.rounds.length + 1,
     matches,
     resting: resting.map(p => ({ id: p.id, name: p.name })),
     timestamp: Date.now(),
   });
+
   save(); renderAll();
 }
 function undoLastRound() {
@@ -550,9 +661,12 @@ function undoLastRound() {
     if (p) p.gamesPlayed = Math.max(0, p.gamesPlayed - 1);
   });
   state.rounds.shift();
+  // ラウンド番号を振り直す(古いラウンドが残っているので新しい番号順に)
+  // 元のSwiftUI実装では振り直しはしていないが、Web版でも同様にしない
   save(); renderAll();
 }
 
+// ----- Rendering -----
 function renderPlayers() {
   const list = document.getElementById("playerList");
   const empty = document.getElementById("playersEmpty");
@@ -565,7 +679,12 @@ function renderPlayers() {
   state.players.forEach(p => {
     const li = document.createElement("li");
     li.className = "player-item" + (p.isActive ? "" : " inactive");
-    li.innerHTML = '<button class="check ' + (p.isActive ? "on" : "") + '" data-action="toggle" data-id="' + p.id + '" aria-label="出場切替"></button><div class="player-name"></div><span class="games-badge">' + p.gamesPlayed + ' 試合</span><button class="delete-btn" data-action="del" data-id="' + p.id + '" aria-label="削除">✕</button>';
+    li.innerHTML = `
+      <button class="check ${p.isActive ? "on" : ""}" data-action="toggle" data-id="${p.id}" aria-label="出場切替"></button>
+      <div class="player-name"></div>
+      <span class="games-badge">${p.gamesPlayed} 試合</span>
+      <button class="delete-btn" data-action="del" data-id="${p.id}" aria-label="削除">✕</button>
+    `;
     li.querySelector(".player-name").textContent = p.name;
     list.appendChild(li);
   });
@@ -575,95 +694,85 @@ function renderMatchPage() {
   document.getElementById("courtNum").textContent = state.courtCount;
   document.getElementById("courtMinus").disabled = state.courtCount <= 1;
   document.getElementById("courtPlus").disabled = state.courtCount >= 20;
+
   const active = activePlayers().length;
   const courts = effectiveCourts();
   const playing = courts * 6;
   const resting = active - playing;
+
   document.getElementById("statActive").textContent = active;
   document.getElementById("statCourts").textContent = courts;
   document.getElementById("statResting").textContent = Math.max(0, resting);
+
   document.getElementById("generateBtn").disabled = courts < 1;
   document.getElementById("undoBtn").disabled = state.rounds.length === 0;
+
+  const latest = document.getElementById("latestRound");
+  if (state.rounds.length === 0) {
+    latest.innerHTML = "";
+  } else {
+    latest.innerHTML = renderRoundHTML(state.rounds[0], true);
+  }
 }
 
+function renderRoundHTML(round, isLatest) {
+  const date = new Date(round.timestamp);
+  const time = `${date.getHours()}:${String(date.getMinutes()).padStart(2,"0")}`;
+  let html = `
+    <div class="${isLatest ? "" : "history-round"}">
+      <div class="round-header">
+        <div class="round-title">${isLatest ? "最新ラウンド" : "ラウンド " + round.roundNumber}</div>
+        <div class="round-meta">${isLatest ? "Round " + round.roundNumber + " · " + time : time}</div>
+      </div>
+  `;
+  round.matches.forEach(m => {
+    html += `
+      <div class="court-block">
+        <div class="court-block-header">コート ${m.courtNumber}</div>
+        <div class="teams">
+          <div class="team A">
+            <div class="team-label">TEAM A</div>
+            ${m.teamA.map(p => `<div class="team-player"></div>`).join("")}
+          </div>
+          <div class="vs">VS</div>
+          <div class="team B">
+            <div class="team-label">TEAM B</div>
+            ${m.teamB.map(p => `<div class="team-player"></div>`).join("")}
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  if (round.resting && round.resting.length > 0) {
+    html += `
+      <div class="resting">
+        <div class="resting-label">休憩 (${round.resting.length}名)</div>
+        <div class="resting-list"></div>
+      </div>
+    `;
+  }
+  html += `</div>`;
+
+  // ここでは名前をエスケープしたいので、後段でDOM上に埋め込む
+  return html;
+}
+
+// XSS対策: HTMLにそのまま埋め込まず、生成後にtextContentで名前を流し込む
 function renderRoundDOM(round, isLatest) {
   const wrap = document.createElement("div");
-  if (!isLatest) wrap.className = "history-round";
-  const date = new Date(round.timestamp);
-  const time = date.getHours() + ":" + String(date.getMinutes()).padStart(2,"0");
-  const header = document.createElement("div");
-  header.className = "round-header";
-  const title = document.createElement("div");
-  title.className = "round-title";
-  title.textContent = isLatest ? "最新ラウンド" : "ラウンド " + round.roundNumber;
-  const meta = document.createElement("div");
-  meta.className = "round-meta";
-  meta.textContent = isLatest ? ("Round " + round.roundNumber + " · " + time) : time;
-  header.appendChild(title); header.appendChild(meta);
-  wrap.appendChild(header);
-
-  round.matches.forEach(m => {
-    const block = document.createElement("div");
-    block.className = "court-block";
-    const bh = document.createElement("div");
-    bh.className = "court-block-header";
-    bh.textContent = "コート " + m.courtNumber;
-    block.appendChild(bh);
-    const teams = document.createElement("div");
-    teams.className = "teams";
-    const teamA = document.createElement("div");
-    teamA.className = "team A";
-    const labelA = document.createElement("div");
-    labelA.className = "team-label";
-    labelA.textContent = "TEAM A";
-    teamA.appendChild(labelA);
-    m.teamA.forEach(p => {
-      const d = document.createElement("div");
-      d.className = "team-player";
-      d.textContent = p.name;
-      teamA.appendChild(d);
-    });
-    const vs = document.createElement("div");
-    vs.className = "vs";
-    vs.textContent = "VS";
-    const teamB = document.createElement("div");
-    teamB.className = "team B";
-    const labelB = document.createElement("div");
-    labelB.className = "team-label";
-    labelB.textContent = "TEAM B";
-    teamB.appendChild(labelB);
-    m.teamB.forEach(p => {
-      const d = document.createElement("div");
-      d.className = "team-player";
-      d.textContent = p.name;
-      teamB.appendChild(d);
-    });
-    teams.appendChild(teamA); teams.appendChild(vs); teams.appendChild(teamB);
-    block.appendChild(teams);
-    wrap.appendChild(block);
+  wrap.innerHTML = renderRoundHTML(round, isLatest);
+  // 各 .court-block について、対応する match の名前を入れる
+  const blocks = wrap.querySelectorAll(".court-block");
+  blocks.forEach((block, idx) => {
+    const m = round.matches[idx];
+    const aPlayers = block.querySelectorAll(".team.A .team-player");
+    const bPlayers = block.querySelectorAll(".team.B .team-player");
+    m.teamA.forEach((p, i) => { if (aPlayers[i]) aPlayers[i].textContent = p.name; });
+    m.teamB.forEach((p, i) => { if (bPlayers[i]) bPlayers[i].textContent = p.name; });
   });
-
-  if (round.resting && round.resting.length > 0) {
-    const rest = document.createElement("div");
-    rest.className = "resting";
-    const rl = document.createElement("div");
-    rl.className = "resting-label";
-    rl.textContent = "休憩 (" + round.resting.length + "名)";
-    const rlist = document.createElement("div");
-    rlist.className = "resting-list";
-    rlist.textContent = round.resting.map(p => p.name).join(" / ");
-    rest.appendChild(rl); rest.appendChild(rlist);
-    wrap.appendChild(rest);
-  }
-  return wrap;
-}
-
-function renderLatestRoundSafe() {
-  const container = document.getElementById("latestRound");
-  container.innerHTML = "";
-  if (state.rounds.length > 0) {
-    container.appendChild(renderRoundDOM(state.rounds[0], true));
-  }
+  const rest = wrap.querySelector(".resting-list");
+  if (rest && round.resting) rest.textContent = round.resting.map(p => p.name).join(" / ");
+  return wrap.firstElementChild;
 }
 
 function renderHistory() {
@@ -680,6 +789,15 @@ function renderHistory() {
   });
 }
 
+// 最新ラウンドのDOMも、textContentでの埋め込みに揃える
+function renderLatestRoundSafe() {
+  const container = document.getElementById("latestRound");
+  container.innerHTML = "";
+  if (state.rounds.length > 0) {
+    container.appendChild(renderRoundDOM(state.rounds[0], true));
+  }
+}
+
 function renderAll() {
   renderPlayers();
   renderMatchPage();
@@ -687,6 +805,7 @@ function renderAll() {
   renderHistory();
 }
 
+// ----- Events -----
 document.querySelectorAll(".tab").forEach(t => {
   t.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
@@ -726,7 +845,9 @@ document.getElementById("courtPlus").addEventListener("click", () => {
   if (state.courtCount < 20) { state.courtCount++; save(); renderMatchPage(); }
 });
 
-document.getElementById("generateBtn").addEventListener("click", generateNextRound);
+document.getElementById("generateBtn").addEventListener("click", () => {
+  generateNextRound();
+});
 document.getElementById("undoBtn").addEventListener("click", () => {
   if (state.rounds.length === 0) return;
   if (confirm("直前のラウンドを取り消しますか?(試合カウントも戻ります)")) {
@@ -734,6 +855,7 @@ document.getElementById("undoBtn").addEventListener("click", () => {
   }
 });
 
+// Menu sheet
 const sheet = document.getElementById("menuSheet");
 document.getElementById("menuBtn").addEventListener("click", () => sheet.classList.add("show"));
 document.getElementById("closeSheetBtn").addEventListener("click", () => sheet.classList.remove("show"));
@@ -751,6 +873,7 @@ document.getElementById("resetAllBtn").addEventListener("click", () => {
   }
 });
 
+// ----- Init -----
 load();
 renderAll();
 </script>
